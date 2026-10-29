@@ -1,0 +1,6 @@
+{
+  "name": "AM AniStudio",
+  "description": "Complete AI Anime Production Platform with Prompt-to-Anime pipeline, Script & Scene planning, 2D/3D Character Studio, Timeline & Audio editing, and Media Export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

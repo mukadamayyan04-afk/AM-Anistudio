@@ -1,0 +1,100 @@
+name: Build Debug APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Verify Java environment
+        run: |
+          JAVA_MAJOR_VERSION=$(java -version 2>&1 | head -n 1 | awk -F '"' '{print $2}' | cut -d'.' -f1)
+          echo "Detected Java major version: ${JAVA_MAJOR_VERSION}"
+          if [ "${JAVA_MAJOR_VERSION}" -lt 17 ]; then
+            echo "Error: Java version 17 or higher is required."
+            exit 1
+          fi
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Create temporary debug keystore
+        run: |
+          if [ ! -f ./debug.keystore ]; then
+            echo "Creating temporary debug keystore..."
+            keytool -genkeypair -v -keystore ./debug.keystore -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
+          else
+            echo "debug.keystore already exists."
+          fi
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Verify APK
+        run: |
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$APK_PATH" ]; then
+            echo "Standard APK path not found. Searching in app/build/outputs/apk..."
+            FOUND_APK=$(find app/build/outputs/apk -name "*.apk" -type f | head -n 1)
+            if [ -n "$FOUND_APK" ]; then
+              echo "Found alternative APK: $FOUND_APK"
+              mkdir -p app/build/outputs/apk/debug
+              cp "$FOUND_APK" "$APK_PATH"
+            else
+              echo "Error: No debug APK found."
+              exit 1
+            fi
+          fi
+          echo "Verified APK at: $APK_PATH"
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Prepare APK release asset
+        id: prepare_asset
+        run: |
+          TMP_APK="${RUNNER_TEMP}/app-debug.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "$TMP_APK"
+          echo "apk_path=${TMP_APK}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish APK to GitHub Releases
+        id: create_release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG_NAME="debug-apk-build-${{ github.run_number }}-${{ github.run_attempt }}"
+          RELEASE_TITLE="Debug APK Build #${{ github.run_number }}"
+          gh release create "$TAG_NAME" "${{ steps.prepare_asset.outputs.apk_path }}" \
+            --target "${{ github.sha }}" \
+            --title "$RELEASE_TITLE" \
+            --notes "Automated Debug APK build from GitHub Actions workflow run #${{ github.run_number }}." \
+            --latest
+
+      - name: Report APK download result
+        run: |
+          DOWNLOAD_URL="https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/app-debug.apk"
+          echo "### Build and Release Status" >> $GITHUB_STEP_SUMMARY
+          echo "Direct APK download link: [app-debug.apk](${DOWNLOAD_URL})" >> $GITHUB_STEP_SUMMARY
+          echo "Permanent Direct Link: \`${DOWNLOAD_URL}\`" >> $GITHUB_STEP_SUMMARY
